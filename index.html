@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Python Code & Learn</title>
+
+  <!-- CodeMirror CSS & JS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+
+  <!-- Pyodide (Python in Browser) -->
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #0f172a; color: #f8fafc; padding: 16px; display: flex; flex-direction: column; height: 100vh; gap: 12px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.1rem; font-weight: 600; color: #38bdf8; }
+    .status { font-size: 0.8rem; color: #94a3b8; }
+    .main-grid { display: grid; grid-template-columns: 1fr; gap: 12px; flex: 1; min-height: 0; }
+    @media (min-width: 768px) { .main-grid { grid-template-columns: 1fr 1fr; } }
+    .panel { display: flex; flex-direction: column; background: #1e293b; border-radius: 8px; border: 1px solid #334155; overflow: hidden; min-height: 220px; }
+    .panel-header { padding: 8px 12px; background: #0f172a; border-bottom: 1px solid #334155; font-size: 0.8rem; font-weight: 600; color: #cbd5e1; }
+    .CodeMirror { height: 100%; font-size: 14px; font-family: monospace; }
+    .error-highlight { background-color: rgba(239, 68, 68, 0.3) !important; }
+    .btn-bar { display: flex; justify-content: flex-end; padding: 8px; background: #1e293b; border-top: 1px solid #334155; }
+    button { background: #0284c7; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    button:disabled { background: #475569; }
+    #console { flex: 1; padding: 12px; font-family: monospace; font-size: 13px; white-space: pre-wrap; overflow-y: auto; color: #e2e8f0; }
+    .output-text { color: #4ade80; }
+    .error-box { background: rgba(239, 68, 68, 0.12); border-left: 4px solid #ef4444; padding: 10px; border-radius: 4px; }
+    .error-title { color: #f87171; font-weight: bold; margin-bottom: 4px; }
+    .error-hint { color: #fdba74; font-size: 0.85rem; margin-top: 6px; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Python Practice App</h1>
+    <span class="status" id="py-status">Loading Python runtime...</span>
+  </header>
+
+  <div class="main-grid">
+    <div class="panel">
+      <div class="panel-header">CODE EDITOR</div>
+      <textarea id="editor"># Write your Python code here
+name = "World"
+print(f"Hello, {name}!")
+
+# Try an error:
+# print(x)
+</textarea>
+      <div class="btn-bar">
+        <button id="run-btn" disabled onclick="runCode()">Run Code</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">OUTPUT & ERROR DETAILS</div>
+      <div id="console">Loading Python environment...</div>
+    </div>
+  </div>
+
+  <script>
+    let pyodideInstance = null;
+    let activeLineHandle = null;
+
+    const editor = CodeMirror.fromTextArea(document.getElementById("editor"), {
+      mode: "python",
+      theme: "dracula",
+      lineNumbers: true,
+      indentUnit: 4,
+      tabSize: 4
+    });
+
+    const errorGuidance = {
+      "NameError": "A variable was used before being assigned. Check for typos.",
+      "SyntaxError": "Invalid Python syntax. Ensure quotes, parentheses, brackets, and colons are properly closed.",
+      "IndentationError": "Spacing issue. Make sure lines inside blocks are indented consistently (4 spaces).",
+      "TypeError": "Wrong type used for an operation (e.g. adding string + integer).",
+      "IndexError": "List index is out of bounds. Lists start at index 0.",
+      "ZeroDivisionError": "Division by zero is not allowed.",
+      "KeyError": "The dictionary key you requested does not exist."
+    };
+
+    async function initPyodide() {
+      const status = document.getElementById("py-status");
+      const consoleOut = document.getElementById("console");
+      const runBtn = document.getElementById("run-btn");
+
+      try {
+        pyodideInstance = await loadPyodide();
+        status.textContent = "Python Ready";
+        status.style.color = "#4ade80";
+        consoleOut.innerHTML = "<span style='color: #94a3b8;'>Ready. Click 'Run Code' to execute.</span>";
+        runBtn.disabled = false;
+      } catch (err) {
+        status.textContent = "Failed to load Python";
+        consoleOut.innerHTML = `<span style='color: #f87171;'>Init error: ${err.message}</span>`;
+      }
+    }
+
+    async function runCode() {
+      const consoleOut = document.getElementById("console");
+      consoleOut.innerHTML = "";
+
+      if (activeLineHandle) {
+        editor.removeLineClass(activeLineHandle, "background", "error-highlight");
+        activeLineHandle = null;
+      }
+
+      const userCode = editor.getValue();
+
+      await pyodideInstance.runPythonAsync(`
+        import sys, io
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+      `);
+
+      try {
+        await pyodideInstance.runPythonAsync(userCode);
+        const stdout = pyodideInstance.runPython("sys.stdout.getvalue()");
+        consoleOut.innerHTML = stdout.trim().length === 0
+          ? "<span style='color: #94a3b8;'>[Done - No output produced]</span>"
+          : `<span class="output-text">${escapeHtml(stdout)}</span>`;
+      } catch (err) {
+        handleExecutionError(err.message);
+      }
+    }
+
+    function handleExecutionError(rawError) {
+      const consoleOut = document.getElementById("console");
+      const lineMatch = rawError.match(/line (\d+)/i);
+      const lineNumber = lineMatch ? parseInt(lineMatch[1], 10) : null;
+
+      const errorMatch = rawError.match(/([A-Za-z]+Error): (.+)/);
+      const errorType = errorMatch ? errorMatch[1] : "Runtime Error";
+      const errorMessage = errorMatch ? errorMatch[2] : rawError;
+
+      if (lineNumber !== null) {
+        activeLineHandle = editor.addLineClass(lineNumber - 1, "background", "error-highlight");
+      }
+
+      const explanation = errorGuidance[errorType] || "Review the code at the highlighted line.";
+
+      consoleOut.innerHTML = `
+        <div class="error-box">
+          <div class="error-title">${escapeHtml(errorType)}${lineNumber ? ` (Line ${lineNumber})` : ""}</div>
+          <div>${escapeHtml(errorMessage)}</div>
+          <div class="error-hint"><strong>Where:</strong> Line ${lineNumber || "unknown"}<br><strong>Fix Hint:</strong> ${explanation}</div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(text) {
+      return text.replace(/[&<>"']/g, (m) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+      }[m]));
+    }
+
+    initPyodide();
+  </script>
+</body>
+</html>
